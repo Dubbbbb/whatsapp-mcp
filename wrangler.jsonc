@@ -12,7 +12,12 @@
   "observability": { "enabled": true },
   "secrets": { "required": ["SECRET"] },
   // OAuth clients and grants. Created on the first deploy.
-  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+  "kv_namespaces": [
+  {
+    "binding": "OAUTH_KV",
+    "id": "132de99eb6714ef58a3bdc74cd97e678"
+  }
+],
   // Sign-in attempts per IP.
   "ratelimits": [
     { "name": "SIGN_IN_LIMIT", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } },
