@@ -2,6 +2,23 @@ import type { ArchivedMessage } from "../store/archive"
 
 export const TRANSCRIPTION_MODEL = "@cf/openai/whisper-large-v3-turbo"
 
+export async function transcribeDuringRollout(
+  current: () => Promise<string>,
+  fallback: () => Promise<string>,
+): Promise<string> {
+  try {
+    return await current()
+  } catch (error) {
+    // Workers and their Durable Objects can run different versions during rollout.
+    if (
+      !(error instanceof Error) ||
+      !error.message.includes('does not implement the method "transcribeAudio"')
+    )
+      throw error
+    return fallback()
+  }
+}
+
 export async function transcribeAudio(
   run: (
     model: typeof TRANSCRIPTION_MODEL,

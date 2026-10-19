@@ -5,7 +5,11 @@ import type { WhatsAppAccount } from "../account"
 import type { ArchivedMessage, ChatSummary, SearchHit } from "../store/archive"
 import type { Identity } from "../store/names"
 import { formatLocal, parseLocal } from "../time"
-import { withTranscripts } from "../whatsapp/transcription"
+import {
+  transcribeAudio,
+  transcribeDuringRollout,
+  withTranscripts,
+} from "../whatsapp/transcription"
 
 type Account = DurableObjectStub<WhatsAppAccount>
 
@@ -141,7 +145,16 @@ function presentPerson(
 const READ = { readOnlyHint: true, openWorldHint: false } as const
 const LIVE_READ = { readOnlyHint: true, openWorldHint: true } as const
 
-export function createServer(account: Account, timeZone: string): McpServer {
+export function createServer(account: Account, timeZone: string, ai: Ai): McpServer {
+  const transcribe = (chatJid: string, id: string) =>
+    transcribeDuringRollout(
+      () => account.transcribeAudio(chatJid, id),
+      async () => {
+        const audio = await account.getAudio(chatJid, id)
+        // shortcut: fallback inference is uncached until the Durable Object updates.
+        return transcribeAudio((model, input) => ai.run(model, input), audio.data)
+      },
+    )
   const server = new McpServer(
     { name: "whatsapp-mcp", version: "2.0.0" },
     { instructions: INSTRUCTIONS },
@@ -263,9 +276,7 @@ export function createServer(account: Account, timeZone: string): McpServer {
         after: toUnix(input.after),
         senderJid: input.from,
       })
-      const enriched = await withTranscripts(messages, (chatJid, id) =>
-        account.transcribeAudio(chatJid, id),
-      )
+      const enriched = await withTranscripts(messages, transcribe)
       return json({ messages: enriched.map((message) => presentMessage(message, timeZone)) })
     },
   )
@@ -280,7 +291,7 @@ export function createServer(account: Account, timeZone: string): McpServer {
       annotations: LIVE_READ,
     },
     async ({ chat: chatJid, message_id }) =>
-      json({ message_id, transcript: await account.transcribeAudio(chatJid, message_id) }),
+      json({ message_id, transcript: await transcribe(chatJid, message_id) }),
   )
 
   server.registerTool(
@@ -313,9 +324,7 @@ export function createServer(account: Account, timeZone: string): McpServer {
     },
     async (input) => {
       const messages = await account.getMessageContext(input.chat, input.message_id, input.around)
-      const enriched = await withTranscripts(messages, (chatJid, id) =>
-        account.transcribeAudio(chatJid, id),
-      )
+      const enriched = await withTranscripts(messages, transcribe)
       return json({ messages: enriched.map((message) => presentMessage(message, timeZone)) })
     },
   )

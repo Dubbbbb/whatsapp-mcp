@@ -4,6 +4,7 @@ import { rejects } from "node:assert/strict"
 import type { ArchivedMessage } from "../src/store/archive"
 import {
   transcribeAudio,
+  transcribeDuringRollout,
   TRANSCRIPTION_MODEL,
   withTranscripts,
 } from "../src/whatsapp/transcription"
@@ -25,6 +26,25 @@ const message = (id: string, kind: ArchivedMessage["kind"] = "voice"): ArchivedM
   edited: false,
   deleted: false,
   reactions: [],
+})
+
+test("rollout fallback handles only the missing new RPC method, never retries provider failures", async () => {
+  const fallback = mock(async () => "recognized on Worker")
+  expect(await transcribeDuringRollout(async () => "cached", fallback)).toBe("cached")
+  expect(fallback).not.toHaveBeenCalled()
+  expect(
+    await transcribeDuringRollout(async () => {
+      throw new Error('The RPC receiver does not implement the method "transcribeAudio".')
+    }, fallback),
+  ).toBe("recognized on Worker")
+  expect(fallback).toHaveBeenCalledTimes(1)
+  await rejects(
+    transcribeDuringRollout(async () => {
+      throw new Error("quota exceeded")
+    }, fallback),
+    /quota exceeded/,
+  )
+  expect(fallback).toHaveBeenCalledTimes(1)
 })
 
 test("Whisper receives base64 audio, transcribes without translation and trims text", async () => {

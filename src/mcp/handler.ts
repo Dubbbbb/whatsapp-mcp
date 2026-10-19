@@ -10,5 +10,9 @@ export function serveMcp(
 ): Promise<Response> {
   const account = env.ACCOUNT.getByName(accountId)
   const route = new URL(request.url).pathname
-  return createMcpHandler(() => createServer(account, env.TIMEZONE), { route })(request, env, ctx)
+  return createMcpHandler(() => createServer(account, env.TIMEZONE, env.AI), { route })(
+    request,
+    env,
+    ctx,
+  )
 }
