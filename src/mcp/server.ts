@@ -14,6 +14,8 @@ Chats and people are identified by JID: "<id>@lid" or "<number>@s.whatsapp.net" 
 
 Reading comes from the account's archive, which holds what WhatsApp synced at pairing plus everything since. If a chat's history stops too early, load_older_messages asks the phone for more.
 
+Audio and voice messages in reading results include only metadata. Use get_audio with their chat and message id to retrieve the actual audio.
+
 Times are shown in the account's time zone as "YYYY-MM-DD HH:mm". Date filters accept the same format, a bare date, or ISO 8601 with an offset.
 
 Sending is visible to other people and cannot be taken back silently: confirm intent before send_message, edit_message, delete_message or remove_contact unless the user was explicit.`
@@ -259,6 +261,21 @@ export function createServer(account: Account, timeZone: string): McpServer {
         senderJid: input.from,
       })
       return json({ messages: messages.map((message) => presentMessage(message, timeZone)) })
+    },
+  )
+
+  server.registerTool(
+    "get_audio",
+    {
+      title: "Read audio or voice message",
+      description:
+        "Downloads and decrypts one archived audio or voice message (up to 2 MiB) and returns MCP audio content in its original format. Does not transcribe, send messages or mark the chat as read. Requires a connected WhatsApp session; older media may no longer be available.",
+      inputSchema: z.object({ chat, message_id: messageId }),
+      annotations: LIVE_READ,
+    },
+    async ({ chat: chatJid, message_id }) => {
+      const audio = await account.getAudio(chatJid, message_id)
+      return { content: [{ type: "audio", ...audio }] }
     },
   )
 

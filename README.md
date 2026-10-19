@@ -82,6 +82,7 @@ Scripts and clients that can set a header can skip the browser and send `Authori
 | `find_chats`          | Chats by any name or phone number                               |
 | `find_people`         | People by any name or phone, including group members            |
 | `get_messages`        | A chat's messages, with paging and date or sender filters       |
+| `get_audio`           | Downloads a voice or audio message as MCP audio content         |
 | `get_message_context` | A message and the conversation around it                        |
 | `search_messages`     | Search all chats by words, ignoring accents and capitals        |
 | `send_message`        | Sends text, as a reply or with mentions, never twice on retries |
@@ -97,6 +98,14 @@ Scripts and clients that can set a header can skip the browser and send `Authori
 | `get_profile`         | Someone's name, About text and picture                          |
 
 Tools that send or change something tell your assistant so, and most assistants ask you before using them.
+
+For a voice message, first read its chat with `get_messages`, then call `get_audio`
+with the same `chat` and its `message_id`. Audio is downloaded and decrypted on
+demand through the existing WhatsApp session; no extra API key or storage is
+needed. The tool returns the original audio, not a transcript. Playback or
+transcription depends on your MCP client's support for that audio format (WhatsApp
+voice messages usually use OGG/Opus). Inline audio is limited to 2 MiB. The session
+must be connected, and older media may have expired. Deleted messages are rejected.
 
 ## How it works
 
