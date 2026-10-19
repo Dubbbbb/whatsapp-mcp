@@ -26,6 +26,7 @@ import {
 import { durableKvStore } from "./store/durable-kv"
 import type { Identity } from "./store/names"
 import { fetchWaWebVersion } from "./wa-version"
+import { downloadAudio } from "./whatsapp/audio"
 import { type ContactName, removeContact, resolveAddress, saveContact } from "./whatsapp/contacts"
 import { decodeRaw, type KeyedMessage } from "./whatsapp/raw"
 import { makeSocket, type Socket } from "./whatsapp/socket"
@@ -200,6 +201,18 @@ export class WhatsAppAccount extends DurableObject<Env> {
 
   getMessageContext(chatJid: string, id: string, around: number): ArchivedMessage[] {
     return this.archive.getMessageContext(this.resolveChat(chatJid), id, around)
+  }
+
+  async getAudio(chatJid: string, messageId: string) {
+    const jid = this.resolveChat(chatJid)
+    const message = this.archive.getMessage(jid, messageId)
+    if (!message || message.deleted) throw new Error("audio message not found or deleted")
+    if (message.kind !== "voice" && message.kind !== "audio") {
+      throw new Error("message is not an audio or voice message")
+    }
+    return downloadAudio(this.rawMessage(jid, messageId), message.media?.bytes ?? null, (raw) =>
+      this.connectedSocket().downloadMedia(raw, "buffer"),
+    )
   }
 
   searchMessages(query: SearchQuery): SearchHit[] {
