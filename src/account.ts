@@ -31,6 +31,7 @@ import { type ContactName, removeContact, resolveAddress, saveContact } from "./
 import { decodeRaw, type KeyedMessage } from "./whatsapp/raw"
 import { makeSocket, type Socket } from "./whatsapp/socket"
 import { refreshGroupNames, syncArchive } from "./whatsapp/sync"
+import { transcribeAudio } from "./whatsapp/transcription"
 import "./wasm"
 
 const HEARTBEAT_MS = 30_000
@@ -213,6 +214,21 @@ export class WhatsAppAccount extends DurableObject<Env> {
     return downloadAudio(this.rawMessage(jid, messageId), message.media?.bytes ?? null, (raw) =>
       this.connectedSocket().downloadMedia(raw, "buffer"),
     )
+  }
+
+  async transcribeAudio(chatJid: string, messageId: string): Promise<string> {
+    const jid = this.resolveChat(chatJid)
+    const message = this.archive.getMessage(jid, messageId)
+    if (!message || message.deleted || (message.kind !== "voice" && message.kind !== "audio")) {
+      throw new Error("audio message not found, deleted or not audio")
+    }
+    const key = `transcript:${jid}:${messageId}`
+    const cached = await this.ctx.storage.get<string>(key)
+    if (cached !== undefined) return cached
+    const audio = await this.getAudio(jid, messageId)
+    const text = await transcribeAudio((model, input) => this.env.AI.run(model, input), audio.data)
+    await this.ctx.storage.put(key, text)
+    return text
   }
 
   searchMessages(query: SearchQuery): SearchHit[] {

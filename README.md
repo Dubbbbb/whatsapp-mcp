@@ -83,6 +83,7 @@ Scripts and clients that can set a header can skip the browser and send `Authori
 | `find_people`         | People by any name or phone, including group members            |
 | `get_messages`        | A chat's messages, with paging and date or sender filters       |
 | `get_audio`           | Downloads a voice or audio message as MCP audio content         |
+| `transcribe_audio`    | Recognizes speech as original-language text, cached per message |
 | `get_message_context` | A message and the conversation around it                        |
 | `search_messages`     | Search all chats by words, ignoring accents and capitals        |
 | `send_message`        | Sends text, as a reply or with mentions, never twice on retries |
@@ -99,13 +100,26 @@ Scripts and clients that can set a header can skip the browser and send `Authori
 
 Tools that send or change something tell your assistant so, and most assistants ask you before using them.
 
-For a voice message, first read its chat with `get_messages`, then call `get_audio`
-with the same `chat` and its `message_id`. Audio is downloaded and decrypted on
-demand through the existing WhatsApp session; no extra API key or storage is
-needed. The tool returns the original audio, not a transcript. Playback or
-transcription depends on your MCP client's support for that audio format (WhatsApp
-voice messages usually use OGG/Opus). Inline audio is limited to 2 MiB. The session
-must be connected, and older media may have expired. Deleted messages are rejected.
+`get_messages` and `get_message_context` automatically include a `transcript` for
+up to five audio/voice messages per read, newest first. The original message order
+is preserved. `transcribe_audio(chat, message_id)` handles individual messages and
+explicit retries. `get_audio` still returns the original audio if needed.
+
+Recognition uses Cloudflare Workers AI (`@cf/openai/whisper-large-v3-turbo`) through
+the `AI` binding in `wrangler.jsonc`; no separate API key is needed. Audio is sent
+to Cloudflare for recognition. Successful original-language transcripts are cached
+in the account's Durable Object storage, so repeat reads do not repeat inference.
+Transcripts are machine recognition and may contain errors; they are not translations.
+Failures are reported as `transcript_error`, without hiding the message or treating
+it as silence. Transcript text is not included in archive full-text search.
+
+Audio is limited to 2 MiB. First recognition requires a connected WhatsApp session
+and media that has not expired. Deleted messages are rejected even if previously
+transcribed. Workers AI must be available on your Cloudflare account and is subject
+to its usage limits and pricing. No paid plan is enabled by this code.
+
+After deploying, refresh the app's tools in ChatGPT and enable `transcribe_audio`
+if needed. Verify a real voice message returns `transcript` in `get_messages`.
 
 ## How it works
 

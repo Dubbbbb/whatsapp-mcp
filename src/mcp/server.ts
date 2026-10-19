@@ -5,6 +5,7 @@ import type { WhatsAppAccount } from "../account"
 import type { ArchivedMessage, ChatSummary, SearchHit } from "../store/archive"
 import type { Identity } from "../store/names"
 import { formatLocal, parseLocal } from "../time"
+import { withTranscripts } from "../whatsapp/transcription"
 
 type Account = DurableObjectStub<WhatsAppAccount>
 
@@ -14,7 +15,7 @@ Chats and people are identified by JID: "<id>@lid" or "<number>@s.whatsapp.net" 
 
 Reading comes from the account's archive, which holds what WhatsApp synced at pairing plus everything since. If a chat's history stops too early, load_older_messages asks the phone for more.
 
-Audio and voice messages in reading results include only metadata. Use get_audio with their chat and message id to retrieve the actual audio.
+get_messages and get_message_context automatically transcribe up to 5 audio/voice messages per read using Cloudflare Workers AI. The transcript field is machine-recognized speech in the original language, not a verified quote; it can contain errors. If transcript_error is present or you need a particular voice message, use transcribe_audio with its chat and message id. get_audio retrieves the original audio. Do not interpret missing/failed transcription as no reply or no interest.
 
 Times are shown in the account's time zone as "YYYY-MM-DD HH:mm". Date filters accept the same format, a bare date, or ISO 8601 with an offset.
 
@@ -37,7 +38,7 @@ function withMentionNames(text: string, mentions: ArchivedMessage["mentions"]): 
 }
 
 function presentMessage(
-  message: ArchivedMessage,
+  message: ArchivedMessage & { transcript?: string; transcript_error?: string },
   timeZone: string,
 ): Record<string, string | number | boolean | object> {
   const out: Record<string, string | number | boolean | object> = {
@@ -58,6 +59,8 @@ function presentMessage(
     out.reactions = message.reactions.map((reaction) => reaction.emoji).join("")
   if (message.edited) out.edited = true
   if (message.deleted) out.deleted = true
+  if (message.transcript !== undefined) out.transcript = message.transcript
+  if (message.transcript_error !== undefined) out.transcript_error = message.transcript_error
   return out
 }
 
@@ -242,7 +245,7 @@ export function createServer(account: Account, timeZone: string): McpServer {
     {
       title: "Read a chat",
       description:
-        "The latest messages of a chat, oldest first. Page back with `before` set to the oldest `at` you have. Filter by sender in groups with `from`.",
+        "The latest messages of a chat, oldest first, with automatic original-language voice/audio transcripts (up to 5 per read, 2 MiB each) via Cloudflare Workers AI. Transcripts are cached. Failures are explicit and do not hide messages. Page back with before; filter by sender with from.",
       inputSchema: z.object({
         chat,
         limit: z.number().int().min(1).max(200).default(50),
@@ -250,7 +253,7 @@ export function createServer(account: Account, timeZone: string): McpServer {
         after: when.optional().describe("Only messages after this time"),
         from: z.string().min(1).optional().describe("Sender JID (see `from_jid` in results)"),
       }),
-      annotations: READ,
+      annotations: LIVE_READ,
     },
     async (input) => {
       const messages = await account.getMessages({
@@ -260,8 +263,24 @@ export function createServer(account: Account, timeZone: string): McpServer {
         after: toUnix(input.after),
         senderJid: input.from,
       })
-      return json({ messages: messages.map((message) => presentMessage(message, timeZone)) })
+      const enriched = await withTranscripts(messages, (chatJid, id) =>
+        account.transcribeAudio(chatJid, id),
+      )
+      return json({ messages: enriched.map((message) => presentMessage(message, timeZone)) })
     },
+  )
+
+  server.registerTool(
+    "transcribe_audio",
+    {
+      title: "Transcribe audio or voice message",
+      description:
+        "Recognizes speech in an archived WhatsApp audio/voice message up to 2 MiB with Cloudflare Workers AI Whisper. Returns cached original-language text, not a translation. May contain recognition errors. Does not send messages or mark them read. First transcription requires a connected session and available media.",
+      inputSchema: z.object({ chat, message_id: messageId }),
+      annotations: LIVE_READ,
+    },
+    async ({ chat: chatJid, message_id }) =>
+      json({ message_id, transcript: await account.transcribeAudio(chatJid, message_id) }),
   )
 
   server.registerTool(
@@ -284,17 +303,20 @@ export function createServer(account: Account, timeZone: string): McpServer {
     {
       title: "Message in context",
       description:
-        "A message with the messages around it, e.g. to read the conversation behind a search hit.",
+        "A message with the messages around it, including automatic voice/audio transcripts (up to 5). Transcription errors are explicit.",
       inputSchema: z.object({
         chat,
         message_id: messageId,
         around: z.number().int().min(1).max(50).default(8),
       }),
-      annotations: READ,
+      annotations: LIVE_READ,
     },
     async (input) => {
       const messages = await account.getMessageContext(input.chat, input.message_id, input.around)
-      return json({ messages: messages.map((message) => presentMessage(message, timeZone)) })
+      const enriched = await withTranscripts(messages, (chatJid, id) =>
+        account.transcribeAudio(chatJid, id),
+      )
+      return json({ messages: enriched.map((message) => presentMessage(message, timeZone)) })
     },
   )
 
